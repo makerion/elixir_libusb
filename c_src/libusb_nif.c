@@ -101,8 +101,12 @@ static ERL_NIF_TERM list_devices(ErlNifEnv *env, int argc, const ERL_NIF_TERM ar
 
 static void libusb_rt_dtor(ErlNifEnv *env, void *obj)
 {
-    // ResourceData *resource_data = (ResourceData *)obj;
     enif_fprintf(stderr, "libusb_rt_dtor called\r\n");
+
+    ResourceData *resource_data = (ResourceData *)obj;
+    if (resource_data->handle) {
+        libusb_release_interface(resource_data->handle, 0);
+    }
 }
 
 static ERL_NIF_TERM get_handle(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
@@ -142,15 +146,8 @@ static ERL_NIF_TERM get_handle(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
         r = libusb_get_device_descriptor(dev, &desc);
         if (r < 0)
         {
-            enif_fprintf(stderr, "Failed to get device descriptor.\r\n");
-            break;
-        }
-
-        e = libusb_open(dev, &handle);
-        if (e < 0)
-        {
-            enif_fprintf(stderr, "Error opening device. %d\r\n", e);
-            break;
+            libusb_free_device_list(devs, 1);
+            return enif_make_tuple2(env, priv->atom_error, get_libusb_error(env, r));
         }
 
         if(desc.idVendor == id_vendor && desc.idProduct == id_product) {
@@ -160,9 +157,14 @@ static ERL_NIF_TERM get_handle(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
     }
 
     if (found == 0) {
-        enif_fprintf(stderr, "Could not open device.\r\n");
         libusb_free_device_list(devs, 1);
-        libusb_close(handle);
+        return enif_make_tuple2(env, priv->atom_error, enif_make_atom(env, "device_not_found"));
+    }
+
+    e = libusb_open(dev, &handle);
+    if (e < 0)
+    {
+        libusb_free_device_list(devs, 1);
         return enif_make_tuple2(env, priv->atom_error, get_libusb_error(env, e));
     }
 
@@ -211,6 +213,7 @@ static ERL_NIF_TERM release_handle(ErlNifEnv *env, int argc, const ERL_NIF_TERM 
 
     e = libusb_release_interface(resource_data->handle, 0);
     libusb_close(resource_data->handle);
+    resource_data->handle = 0;
     libusb_exit(NULL);
     return priv->atom_ok;
 }
